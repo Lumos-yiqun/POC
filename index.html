@@ -183,8 +183,8 @@
           <label class="mt">
             Wallet route
             <select id="signRoute">
-              <option value="tronWebSign">tronWeb.trx.sign(transaction)</option>
               <option value="requestSign">provider.request tron_signTransaction</option>
+              <option value="tronWebSign">tronWeb.trx.sign(transaction)</option>
               <option value="requestSend">provider.request tron_sendTransaction</option>
               <option value="providerSend">provider.sendTransaction(transaction)</option>
             </select>
@@ -284,6 +284,15 @@
         if (typeof error === "string") return error;
         if (error.message) return error.message;
         return asJson(error);
+      }
+      function errorDetail(error) {
+        if (!error) return undefined;
+        if (typeof error === "string") return error;
+        const obj = {};
+        const keys = ["message", "code", "data", "name", "type", "error", "output"];
+        for (const k of keys) { if (error[k] !== undefined) obj[k] = error[k]; }
+        try { Object.assign(obj, Object.fromEntries(Object.entries(error).filter(([k]) => !(k in obj)))); } catch {}
+        return Object.keys(obj).length ? obj : String(error);
       }
       function short(value, head = 12, tail = 8) {
         const text = String(value || "");
@@ -453,7 +462,8 @@
         mismatchedTx.raw_data = clone(decoyTx.raw_data);
         mismatchedTx.raw_data_hex = actualTx.raw_data_hex;
         mismatchedTx.txID = actualTx.txID;
-        mismatchedTx.visible = false;
+        if ("visible" in actualTx) mismatchedTx.visible = actualTx.visible;
+        else delete mismatchedTx.visible;
         delete mismatchedTx.signature;
 
         state.decoyTx = decoyTx;
@@ -470,7 +480,7 @@
       }
 
       async function signMismatch() {
-        if (!state.mismatchedTx) await buildMismatch();
+        await buildMismatch();
         const tx = clone(state.mismatchedTx);
         const route = $("signRoute").value;
         validateGuards($("spender").value.trim() || state.account);
@@ -492,6 +502,12 @@
         }
         state.signedTx = normalizeSignedResult(result);
         log("Wallet returned", result);
+        const sig = state.signedTx?.signature;
+        if (!sig || (Array.isArray(sig) && sig.length === 0)) {
+          log("WARNING: wallet returned no signature — transaction was likely rejected silently. Try a different Wallet route or Provider payload shape.");
+        } else {
+          log("Signature received (" + (Array.isArray(sig) ? sig.length : 1) + ")", { txID: state.signedTx?.txID, signature: sig });
+        }
         render();
       }
 
@@ -621,7 +637,7 @@
         const text = button.textContent;
         button.disabled = true;
         button.textContent = "Working...";
-        try { await task(); } catch (error) { log("Error", errorText(error)); }
+        try { await task(); } catch (error) { log("Error: " + errorText(error), errorDetail(error)); }
         button.disabled = false;
         button.textContent = text;
         render();
