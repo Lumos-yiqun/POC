@@ -394,6 +394,15 @@
       }
 
       function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+      function toBase58(address) {
+        if (!address) return address;
+        const text = String(address).trim();
+        if (/^T[A-Za-z0-9]{33}$/.test(text)) return text;
+        if (/^41[0-9a-fA-F]{40}$/.test(text)) {
+          try { return state.tronWeb?.address?.fromHex(text) || text; } catch { return text; }
+        }
+        return text;
+      }
       function trxToSun(value) {
         const text = String(value).trim();
         if (!/^\d+(\.\d{1,6})?$/.test(text)) throw new Error("Decoy TRX must be a decimal with up to 6 fractional digits.");
@@ -436,13 +445,13 @@
         detectProviders();
         const tronWeb = state.tronWeb;
         if (!tronWeb?.transactionBuilder) throw new Error("Injected tronWeb.transactionBuilder was not found.");
-        const owner = state.account || tronWeb.defaultAddress?.base58;
+        const owner = toBase58(state.account || tronWeb.defaultAddress?.base58);
         if (!owner) throw new Error("Connect a TRON account first.");
 
-        const decoyTo = requireAddress("decoyTo", owner, "Decoy recipient");
+        const decoyTo = toBase58(requireAddress("decoyTo", owner, "Decoy recipient"));
         const decoySun = trxToSun($("decoyTrx").value);
         const tokenContract = requireAddress("tokenContract", "", "TRC20 contract");
-        const spender = requireAddress("spender", owner, "Approve spender");
+        const spender = toBase58(requireAddress("spender", owner, "Approve spender"));
         const approveAmount = integerText("approveAmount", "Approve amount");
         const feeLimit = Number(integerText("feeLimit", "Fee limit"));
         validateGuards(spender);
