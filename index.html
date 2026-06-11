@@ -183,8 +183,9 @@
           <label class="mt">
             Wallet route
             <select id="signRoute">
+              <option value="tronWebSend">tronWeb.trx.sendTransaction(tx) — vulnerable path ⚠️</option>
               <option value="requestSign">provider.request tron_signTransaction</option>
-              <option value="tronWebSign">tronWeb.trx.sign(transaction)</option>
+              <option value="tronWebSign">tronWeb.trx.sign(transaction) — patched, returns {}</option>
               <option value="requestSend">provider.request tron_sendTransaction</option>
               <option value="providerSend">provider.sendTransaction(transaction)</option>
             </select>
@@ -421,7 +422,7 @@
       }
       function validateGuards(spender) {
         const route = $("signRoute").value;
-        const sendRoute = route === "requestSend" || route === "providerSend";
+        const sendRoute = route === "requestSend" || route === "providerSend" || route === "tronWebSend";
         if (!sameAddress(spender, state.account)) {
           const ok = $("externalSpenderAck").checked && $("externalSpenderUnlock").value.trim() === "ALLOW EXTERNAL SPENDER";
           if (!ok) throw new Error("External spender requires checkbox plus exact phrase: ALLOW EXTERNAL SPENDER");
@@ -485,11 +486,21 @@
         const route = $("signRoute").value;
         validateGuards($("spender").value.trim() || state.account);
         let result;
-        if (route === "tronWebSign") {
+        if (route === "tronWebSend") {
+          if (!state.tronWeb?.trx?.sendTransaction) throw new Error("tronWeb.trx.sendTransaction is unavailable.");
+          log("Calling tronWeb.trx.sendTransaction — preview: raw_data, sign: raw_data_hex (no consistency check)", { txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
+          result = await state.tronWeb.trx.sendTransaction(tx);
+        } else if (route === "tronWebSign") {
           if (!state.tronWeb?.trx?.sign) throw new Error("tronWeb.trx.sign is unavailable.");
           result = await state.tronWeb.trx.sign(tx);
         } else if (route === "requestSign") {
-          result = await providerRequest("tron_signTransaction", tx);
+          if (findRequestProvider()) {
+            result = await providerRequest("tron_signTransaction", tx);
+          } else {
+            log("provider.request not found — falling back to tronWeb.trx.sign");
+            if (!state.tronWeb?.trx?.sign) throw new Error("Neither provider.request nor tronWeb.trx.sign is available.");
+            result = await state.tronWeb.trx.sign(tx);
+          }
         } else if (route === "requestSend") {
           result = await providerRequest("tron_sendTransaction", tx);
         } else if (route === "providerSend") {
@@ -511,9 +522,24 @@
         render();
       }
 
+      function findRequestProvider() {
+        const w = window;
+        const candidates = [
+          state.provider,
+          w.tron,
+          w.tronLink,
+          w.trustwallet?.tron,
+          w.trustWallet?.tron,
+          w.bitkeep?.tronLink,
+          w.okxwallet?.tronLink,
+          state.tronWeb
+        ];
+        return candidates.find(p => p && typeof p.request === "function") || null;
+      }
+
       async function providerRequest(method, tx) {
-        const provider = state.provider || window.tron || window.tronLink;
-        if (typeof provider?.request !== "function") throw new Error("provider.request is unavailable.");
+        const provider = findRequestProvider();
+        if (!provider) throw new Error("provider.request is unavailable.");
         const address = state.account || state.tronWeb?.defaultAddress?.base58 || "";
         const shape = $("requestShape").value;
         const payloads = {
@@ -533,6 +559,10 @@
         if (result.signedTransaction) return result.signedTransaction;
         if (result.transaction?.raw_data_hex) return result.transaction;
         if (result.raw_data_hex || result.txID || result.signature) return result;
+        if (result.data?.raw_data_hex || result.data?.txID || result.data?.signature) return result.data;
+        if ((result.result === true || result.result === "true") && (result.txid || result.transaction_id)) {
+          return { txID: result.txid || result.transaction_id, broadcast: true, raw: result };
+        }
         return result.result || result;
       }
 
@@ -648,7 +678,17 @@
         log(label + " copied");
       }
 
-      $("detectBtn").addEventListener("click", () => { detectProviders(); log("Provider detection refreshed", state.detections); });
+      $("detectBtn").addEventListener("click", () => {
+        detectProviders();
+        const w = window;
+        const caps = {
+          "window.tron": { request: typeof w.tron?.request, sign: typeof w.tron?.tronWeb?.trx?.sign },
+          "window.tronLink": { request: typeof w.tronLink?.request, sign: typeof w.tronLink?.tronWeb?.trx?.sign },
+          "window.tronWeb": { sign: typeof w.tronWeb?.trx?.sign, builder: typeof w.tronWeb?.transactionBuilder?.sendTrx },
+          "state.provider": { request: typeof state.provider?.request, sendTx: typeof state.provider?.sendTransaction }
+        };
+        log("Provider detection refreshed", { detections: state.detections, capabilities: caps });
+      });
       $("connectBtn").addEventListener("click", () => runButton("connectBtn", connectWallet));
       $("buildBtn").addEventListener("click", () => runButton("buildBtn", buildMismatch));
       $("signBtn").addEventListener("click", () => runButton("signBtn", signMismatch));
