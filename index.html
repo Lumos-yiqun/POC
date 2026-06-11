@@ -120,10 +120,33 @@
         .row, .topbar button { width: 100%; }
         button { flex: 1 1 auto; }
       }
+      .mainnet-banner {
+        display: none;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 16px;
+        border: 1.5px solid #b42318;
+        border-radius: 8px;
+        background: #fff5f3;
+        padding: 14px 16px;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .mainnet-banner.visible { display: flex; }
+      .mainnet-banner-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+      .mainnet-banner strong { display: block; color: var(--red); font-size: 14px; margin-bottom: 4px; }
+      .mainnet-banner p { margin: 0; color: #7a1c14; }
     </style>
   </head>
   <body>
     <main class="shell">
+      <div id="mainnetBanner" class="mainnet-banner" role="alert">
+        <span class="mainnet-banner-icon">&#9888;&#65039;</span>
+        <div>
+          <strong>当前连接至 TRON 主网（真实资产环境）</strong>
+          <p>任何经钱包签名并广播的交易将消耗真实 TRX 并产生不可逆的链上效果。请确认测试账户内资产可接受损失，或仅使用 Sign（不广播）路由进行验证。</p>
+        </div>
+      </div>
       <header class="topbar">
         <div>
           <p class="eyebrow">Security verifier</p>
@@ -244,6 +267,7 @@
       const $ = (id) => document.getElementById(id);
       const SELECTOR_APPROVE = "095ea7b3";
       const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
+      const MAINNET_USDT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 
       function clone(value) { return JSON.parse(JSON.stringify(value)); }
       function asJson(value) {
@@ -319,7 +343,7 @@
         const text = String(host);
         if (/nile/i.test(text)) return "Nile (" + text + ")";
         if (/shasta/i.test(text)) return "Shasta (" + text + ")";
-        if (/trongrid|mainnet/i.test(text)) return "Mainnet (" + text + ")";
+        if (/trongrid\.io|trx\.market|tronapi\.io|mainnet/i.test(text) && !/nile|shasta/i.test(text)) return "Mainnet (" + text + ")";
         return text || "unknown";
       }
 
@@ -329,6 +353,7 @@
           if (!$("spender").value.trim()) $("spender").value = state.account;
         }
         if (/nile/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = NILE_USDT;
+        if (/^mainnet/i.test(state.network) && !$("tokenContract").value.trim()) $("tokenContract").value = MAINNET_USDT;
       }
 
       async function connectWallet() {
@@ -579,6 +604,8 @@
         $("providerStatus").textContent = providerLabel;
         $("accountStatus").textContent = state.account || "not connected";
         $("networkStatus").textContent = state.network || "unknown";
+        const isMainnet = /^mainnet/i.test(state.network);
+        $("mainnetBanner").classList.toggle("visible", isMainnet);
         $("decoySummary").textContent = state.mismatchedTx ? summarizeRaw(state.mismatchedTx.raw_data) : "Build a transaction first.";
         $("actualSummary").textContent = state.actualTx ? summarizeRaw(state.actualTx.raw_data) : "Build a transaction first.";
         const built = Boolean(state.mismatchedTx);
